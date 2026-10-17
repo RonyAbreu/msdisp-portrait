@@ -132,4 +132,4 @@ Fase 0 em ~1 dia; Fase 1 com 4 trilhas em paralelo em ~2–3 dias corridos; Fase
   - Reconexão corrigida: o app não reinicia mais em loop; ordem displays → chip; repaint nos 2 buffers; envio que falha marca o dispositivo como fechado.
   - Medidas em 1080p: arrastar janela ~15,5 fps / ~32 ms; tela cheia 7,6 fps (limite do USB 2.0).
 
-Pendências: testar "Voltar ao driver original" e o início automático; instalar o exe num local fixo (hoje roda de `build\`).
+Instalado em `%LOCALAPPDATA%\Programs\msdisp` com início automático (HKCU Run). "Voltar ao driver original" testado: o WinUsbDisplay reassume a tela.

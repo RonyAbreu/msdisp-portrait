@@ -16,6 +16,12 @@ Monitor virtual Parsec (1080x1920, retrato nativo)
 
 O pipeline é serializado: espera o envio USB terminar e só então captura o quadro mais novo. Assim nunca há fila (3 quadros cheios na fila davam ~530 ms de atraso) e nenhuma área alterada se perde.
 
+## Instalação (feita em 17/10/2026)
+
+- Executável: `%LOCALAPPDATA%\Programs\msdisp\msdisp.exe` (estático, sem DLLs extras).
+- Início automático: `HKCU\...\Run\msdisp-portrait`. Também dá para ligar e desligar pelo menu da bandeja.
+- Para atualizar: `msdisp.exe --quit`, copie o novo `build\msdisp.exe` por cima e abra de novo.
+
 ## Uso
 
 1. Rode `build\msdisp.exe`. Aparece um ícone na bandeja, perto do relógio.
