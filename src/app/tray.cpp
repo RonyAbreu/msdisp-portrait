@@ -1,5 +1,7 @@
 #include "tray.h"
 
+#include "../pipeline/layout.h"
+
 #include <dbt.h>
 
 #include <algorithm>
@@ -454,6 +456,7 @@ void TrayApp::onCommand(UINT id) {
 void TrayApp::returnToVendor() {
     MSD_INFO("tray: returning to the vendor driver app");
     controller_->shutdown();  // releases the USB adapter before the vendor app grabs it
+    reattachVendorOutputs();  // its monitor may still be parked (we park it while running)
     if (vendorAutostartRemovedByUs(opts_.configPath)) {
         std::wstring err;
         if (!setVendorAutostart(true, opts_.configPath, &err)) MSD_WARN("tray: vendor autostart not restored");

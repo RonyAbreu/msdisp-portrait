@@ -65,6 +65,13 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
             LocalFree(argv);
             return rc;
         }
+        if (a == L"--quit") {
+            // Ask a running instance to exit cleanly (its window is hidden, so taskkill without /F can't).
+            HWND h = FindWindowW(msdisp::kTrayWindowClass, nullptr);
+            if (h) PostMessageW(h, WM_CLOSE, 0, 0);
+            LocalFree(argv);
+            return h ? 0 : 1;
+        }
         if (a == L"--console") {
             console = true;
         } else if (a == L"--debug") {
