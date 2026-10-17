@@ -138,11 +138,12 @@ public:
                 return AcquireResult::Error;
             }
 
-            const bool newImage = info.LastPresentTime.QuadPart != 0;
+            // The first frame may carry LastPresentTime == 0 on a static desktop: its surface still holds the image.
+            const bool newImage = info.LastPresentTime.QuadPart != 0 || first_;
             const Rect oldCursor = clipped(cursor_.rect());
             bool cursorChanged = false;
             if (info.LastMouseUpdateTime.QuadPart != 0) cursorChanged = updateCursor(info);
-            if ((!newImage && !cursorChanged) || (first_ && !newImage)) {
+            if (!newImage && !cursorChanged) {
                 dup_->ReleaseFrame();
                 if (nowUs() >= deadline) return AcquireResult::Timeout;
                 continue;  // pointer-only update with no visible change: not a frame

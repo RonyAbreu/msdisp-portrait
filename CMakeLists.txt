@@ -52,7 +52,7 @@ target_link_libraries(msdisp_appcore PUBLIC msdisp_common shell32 ole32 user32 a
 file(GLOB APP_SRC CONFIGURE_DEPENDS src/app/*.cpp src/app/*.rc)
 add_executable(msdisp WIN32 ${APP_SRC})
 target_link_options(msdisp PRIVATE -municode)
-target_link_libraries(msdisp PRIVATE msdisp_appcore msdisp_usb msdisp_vdd msdisp_capture msdisp_gpu
+target_link_libraries(msdisp PRIVATE msdisp_appcore msdisp_pipeline msdisp_usb msdisp_vdd msdisp_capture msdisp_gpu
   comctl32 shell32 user32 gdi32)
 
 # --- tools ------------------------------------------------------------------
