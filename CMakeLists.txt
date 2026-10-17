@@ -38,7 +38,7 @@ add_library(msdisp_gpu STATIC ${GPU_SRC})
 target_link_libraries(msdisp_gpu PUBLIC msdisp_common d3d11 dxgi d3dcompiler)
 
 # --- integration: pipeline -----------------------------------------------------
-add_library(msdisp_pipeline STATIC src/pipeline/pipeline.cpp)
+add_library(msdisp_pipeline STATIC src/pipeline/pipeline.cpp src/pipeline/layout.cpp)
 target_link_libraries(msdisp_pipeline PUBLIC msdisp_usb msdisp_vdd msdisp_capture msdisp_gpu)
 
 add_executable(portrait-run tools/portrait-run/main.cpp)

@@ -20,7 +20,7 @@ constexpr uint16_t kVid = 0x534D;
 constexpr uint16_t kPid = 0x6021;
 constexpr int kHidInterface = 0;
 constexpr unsigned char kBulkEp = 0x04;
-constexpr int kSlots = 3;
+constexpr int kSlots = 1;
 constexpr int kEtimedout = 116;  // libusb-win32 errno value
 constexpr int kHeaderLen = 8;
 constexpr uint8_t kTerminator[8] = {0xFF, 0xC0, 0, 0, 0, 0, 0, 0};
@@ -102,8 +102,16 @@ public:
                 return false;
             }
         }
-        const char* env = std::getenv("MSDISP_SINGLE_RECT");
-        multiRect_ = !(env && *env == '1');
+        // Phase 2 finding: the MS912x applies only one rectangle per bulk transfer reliably, and it rotates
+        // between 2 frame buffers per transfer. Defaults follow the vendor driver: bounding box + 2 buffers + ZLP.
+        const char* env = std::getenv("MSDISP_MULTI_RECT");
+        multiRect_ = env && *env == '1';
+        env = std::getenv("MSDISP_ZLP");
+        zlp_ = !(env && *env == '0');
+        env = std::getenv("MSDISP_NBUF");
+        nbuf_ = env ? std::clamp(atoi(env), 1, kMaxBuf) : 2;
+        env = std::getenv("MSDISP_DOUBLE");
+        if (env && *env == '0') nbuf_ = 1;
         MSD_INFO("device open: %s iface=%d hid=%ls multiRect=%d", found->filename, iface_, hid_.path().c_str(),
                  multiRect_);
         return true;
@@ -166,6 +174,8 @@ public:
                   vid(kSubTransfer, {0x01}) && vid(kSubVideoEnable, {0x01});
         if (ok) {
             mode_ = m;
+            cur_ = 0;  // which physical buffer comes first doesn't matter: every buffer gets all damage
+            for (auto& p : pending_) p.reset(m.width, m.height);
             MSD_INFO("device started %dx%d@%d vic=0x%02x", m.width, m.height, m.hz, m.vic);
         } else {
             MSD_ERROR("device start sequence failed");
@@ -183,43 +193,21 @@ public:
 
     bool submit(const FrameUpdate& u) override {
         if (!uh_ || u.rects.empty()) return false;
-        std::vector<Rect> rects;
-        rects.reserve(u.rects.size());
-        Rect bbox{};
-        bool first = true;
-        for (Rect r : u.rects) {
-            int x0 = std::clamp(r.x & ~1, 0, mode_.width), y0 = std::clamp(r.y, 0, mode_.height);
-            int x1 = std::clamp((r.right() + 1) & ~1, 0, mode_.width), y1 = std::clamp(r.bottom(), 0, mode_.height);
-            if (x1 <= x0 || y1 <= y0) continue;
-            Rect c{x0, y0, x1 - x0, y1 - y0};
-            rects.push_back(c);
-            if (first) bbox = c, first = false;
-            else {
-                int bx1 = std::max(bbox.right(), c.right()), by1 = std::max(bbox.bottom(), c.bottom());
-                bbox.x = std::min(bbox.x, c.x), bbox.y = std::min(bbox.y, c.y);
-                bbox.w = bx1 - bbox.x, bbox.h = by1 - bbox.y;
-            }
-        }
-        if (rects.empty()) return false;
-        if (!multiRect_) rects.assign(1, bbox);
-
         std::lock_guard<std::mutex> lock(mu_);
-        reapLocked(0);
-        Slot* slot = nullptr;
-        for (auto& s : slots_)
-            if (!s.busy) {
-                slot = &s;
-                break;
-            }
+        // One transfer at a time: the chip double-buffers and flips on each transfer end (ZLP), so ordering
+        // data -> ZLP -> next data must be strict.
+        if (!reapLocked(2000)) return false;
+        for (const Rect& r : u.rects)
+            for (int b = 0; b < nbuf_; ++b) pending_[b].mark(r);
+        std::vector<Rect> rects = pending_[cur_].extract(multiRect_ ? kMaxRectsPerTransfer : 1);
         stats_.framesSubmitted++;
-        if (!slot) {
-            stats_.framesDropped++;
-            return false;
-        }
+        if (rects.empty()) return true;
+
+        Slot& slot = slots_[0];
         size_t total = sizeof(kTerminator);
         for (const Rect& r : rects) total += kHeaderLen + size_t(r.w) * 2 * r.h;
-        if (slot->buf.size() < total) slot->buf.resize(total);
-        uint8_t* p = slot->buf.data();
+        if (slot.buf.size() < total) slot.buf.resize(total);
+        uint8_t* p = slot.buf.data();
         for (const Rect& r : rects) {
             putHeader(p, r);
             p += kHeaderLen;
@@ -228,13 +216,15 @@ public:
         }
         std::memcpy(p, kTerminator, sizeof(kTerminator));
         const usb0::Api* a = usb0::api();
-        if (a->submit_async(slot->ctx, reinterpret_cast<char*>(slot->buf.data()), int(total)) < 0) {
+        if (a->submit_async(slot.ctx, reinterpret_cast<char*>(slot.buf.data()), int(total)) < 0) {
             MSD_ERROR("usb_submit_async failed: %s", a->strerror());
             return false;
         }
-        slot->busy = true;
-        slot->len = int(total);
-        slot->t0 = nowUs();
+        slot.busy = true;
+        slot.len = int(total);
+        slot.t0 = nowUs();
+        pending_[cur_].clear();
+        cur_ = (cur_ + 1) % nbuf_;
         return true;
     }
 
@@ -249,6 +239,70 @@ public:
     }
 
 private:
+    static constexpr int kMaxRectsPerTransfer = 32;
+    static constexpr int kMaxBuf = 4;
+    // Grid granularity matches the official driver's alignment (x/w multiple of 4, y/h multiple of 2).
+    static constexpr int kCellW = 16, kCellH = 2;
+
+    // Per-buffer accumulated damage on a coarse grid.
+    struct Damage {
+        int cols = 0, rows = 0, w = 0, h = 0;
+        std::vector<uint8_t> cells;
+        bool any = false;
+        void reset(int width, int height) {
+            w = width, h = height;
+            cols = (width + kCellW - 1) / kCellW, rows = (height + kCellH - 1) / kCellH;
+            cells.assign(size_t(cols) * rows, 0);
+            any = false;
+        }
+        void clear() {
+            if (any) std::fill(cells.begin(), cells.end(), 0);
+            any = false;
+        }
+        void mark(const Rect& r) {
+            int c0 = std::clamp(r.x / kCellW, 0, cols), c1 = std::clamp((r.right() + kCellW - 1) / kCellW, 0, cols);
+            int r0 = std::clamp(r.y / kCellH, 0, rows), r1 = std::clamp((r.bottom() + kCellH - 1) / kCellH, 0, rows);
+            for (int y = r0; y < r1; ++y) std::fill(&cells[size_t(y) * cols + c0], &cells[size_t(y) * cols + c1], 1);
+            if (c1 > c0 && r1 > r0) any = true;
+        }
+        // Horizontal runs per grid row, merged vertically when the span repeats; falls back to the bounding box
+        // when that would exceed maxRects.
+        std::vector<Rect> extract(int maxRects) const {
+            std::vector<Rect> out, open, next;
+            if (!any) return out;
+            Rect bb{w, h, 0, 0};
+            int bx1 = 0, by1 = 0;
+            for (int y = 0; y < rows; ++y) {
+                next.clear();
+                const uint8_t* row = &cells[size_t(y) * cols];
+                size_t oi = 0;
+                for (int x = 0; x < cols;) {
+                    if (!row[x]) { ++x; continue; }
+                    int x1 = x;
+                    while (x1 < cols && row[x1]) ++x1;
+                    Rect r{x * kCellW, y * kCellH, std::min(x1 * kCellW, w) - x * kCellW,
+                           std::min((y + 1) * kCellH, h) - y * kCellH};
+                    bb.x = std::min(bb.x, r.x), bb.y = std::min(bb.y, r.y);
+                    bx1 = std::max(bx1, r.right()), by1 = std::max(by1, r.bottom());
+                    x = x1;
+                    while (oi < open.size() && open[oi].x < r.x) out.push_back(open[oi++]);
+                    if (oi < open.size() && open[oi].x == r.x && open[oi].w == r.w) {
+                        Rect m = open[oi++];
+                        m.h = r.bottom() - m.y;
+                        next.push_back(m);
+                    } else {
+                        next.push_back(r);
+                    }
+                }
+                while (oi < open.size()) out.push_back(open[oi++]);
+                open.swap(next);
+            }
+            out.insert(out.end(), open.begin(), open.end());
+            if (int(out.size()) > maxRects) out.assign(1, Rect{bb.x, bb.y, bx1 - bb.x, by1 - bb.y});
+            return out;
+        }
+    };
+
     struct Slot {
         std::vector<uint8_t> buf;
         void* ctx = nullptr;
@@ -257,35 +311,41 @@ private:
         int64_t t0 = 0;
     };
 
-    // Collects finished transfers; returns false if any is still pending after timeout or failed.
+    // Waits for the in-flight transfer, then sends the zero-length packet that ends it (the chip flips buffers
+    // on it). Returns false on timeout or failure.
     bool reapLocked(int timeoutMs) {
         const usb0::Api* a = usb0::api();
-        bool ok = true;
-        for (auto& s : slots_) {
-            if (!s.busy) continue;
-            int r = a->reap_async_nocancel(s.ctx, timeoutMs);
-            if (r == -kEtimedout) {
-                if (timeoutMs > 0) ok = false;
-                continue;
-            }
-            s.busy = false;
-            if (r < 0) {
-                MSD_ERROR("bulk transfer failed (%d): %s", r, a->strerror());
-                ok = false;
-            } else {
-                stats_.bytesSent += uint64_t(r);
-                stats_.lastTransferMs = double(nowUs() - s.t0) / 1000.0;
+        Slot& s = slots_[0];
+        if (!s.busy) return true;
+        int r = a->reap_async_nocancel(s.ctx, timeoutMs);
+        if (r == -kEtimedout) return timeoutMs == 0;
+        s.busy = false;
+        if (r < 0) {
+            MSD_ERROR("bulk transfer failed (%d): %s", r, a->strerror());
+            return false;
+        }
+        if (zlp_) {
+            char dummy = 0;
+            if (a->bulk_write(uh_, kBulkEp, &dummy, 0, 1000) < 0) {
+                MSD_WARN("zero-length packet not supported (%s); continuing without", a->strerror());
+                zlp_ = false;
             }
         }
-        return ok;
+        stats_.bytesSent += uint64_t(r);
+        stats_.lastTransferMs = double(nowUs() - s.t0) / 1000.0;
+        return true;
     }
 
+    Damage pending_[kMaxBuf];
+    int cur_ = 0;
+    bool zlp_ = true;
+    int nbuf_ = 2;  // chip frame buffers in rotation: damage is replayed into each of them
     HidControl hid_;
     usb0::usb_dev_handle* uh_ = nullptr;
     int iface_ = -1;
     Slot slots_[kSlots];
     Mode mode_;
-    bool multiRect_ = true;
+    bool multiRect_ = false;
     DeviceStats stats_;
     mutable std::mutex mu_;
 };

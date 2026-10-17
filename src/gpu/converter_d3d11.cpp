@@ -241,7 +241,7 @@ public:
             D3D11_BOX box = {UINT(y0) * rowBytes, 0, 0, UINT(y1) * rowBytes, 1, 1};
             c->CopySubresourceRegion(packedStaging_.get(), 0, box.left, 0, 0, packed_.get(), 0, &box);
         };
-        if (!stagingValid_) {
+        if (!stagingValid_ || forceFull) {
             c->CopyResource(packedStaging_.get(), packed_.get());
             stagingValid_ = true;
         } else {

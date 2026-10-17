@@ -82,6 +82,54 @@ Mode pickMode(const Opts& o) {
     return m;
 }
 
+// Moving 32x32 square, 4 variants (color coded) of ZLP / double-buffer damage / pacing.
+int cmdTrail(const Opts& o) {
+    struct V { const char* name; const char* zlp; const char* dbl; const char* single; int paceMs; int r, g, b; };
+    const V vs[] = {{"RED    single zlp=1 nbuf=1", "1", "1", "1", 0, 255, 0, 0},
+                    {"GREEN  single zlp=1 nbuf=2", "1", "2", "1", 0, 0, 255, 0},
+                    {"BLUE   single zlp=1 nbuf=3", "1", "3", "1", 0, 0, 80, 255},
+                    {"YELLOW single zlp=1 nbuf=4", "1", "4", "1", 0, 255, 255, 0}};
+    Mode m = pickMode(o);
+    int pitch = m.width * 2;
+    std::vector<uint8_t> frame(size_t(pitch) * m.height);
+    for (const V& v : vs) {
+        SetEnvironmentVariableA("MSDISP_ZLP", v.zlp);
+        _putenv_s("MSDISP_ZLP", v.zlp);
+        _putenv_s("MSDISP_NBUF", v.dbl);
+        _putenv_s("MSDISP_SINGLE_RECT", v.single);
+        auto dev = createMs912xDevice();
+        if (!dev->open() || !dev->start(m)) return 1;
+        fillRect(frame, pitch, {0, 0, m.width, m.height}, 60, 60, 60);
+        FrameUpdate full{frame.data(), pitch, {{0, 0, m.width, m.height}}};
+        dev->submit(full);
+        dev->submit(full);
+        dev->flush(2000);
+        printf("variant %s\n", v.name), fflush(stdout);
+        int x = 100, y = 100, dx = 6, dy = 4, n = 0;
+        int64_t end = nowUs() + int64_t(o.sec) * 1000000;
+        while (nowUs() < end) {
+            Rect old{x, y, 32, 32};
+            fillRect(frame, pitch, old, 60, 60, 60);
+            x += dx, y += dy;
+            if (x < 0 || x + 32 > m.width) dx = -dx, x += 2 * dx;
+            if (y < 0 || y + 32 > m.height) dy = -dy, y += 2 * dy;
+            Rect cur{x, y, 32, 32};
+            fillRect(frame, pitch, cur, v.r, v.g, v.b);
+            FrameUpdate up{frame.data(), pitch, {old, cur}};
+            dev->submit(up);
+            dev->flush(1000);
+            if (v.paceMs) Sleep(DWORD(v.paceMs));
+            ++n;
+        }
+        printf("  %d updates; holding 4 s\n", n), fflush(stdout);
+        Sleep(4000);
+        dev->stop();
+        dev->close();
+        Sleep(1500);
+    }
+    return 0;
+}
+
 int cmdRun(const std::string& cmd, const Opts& o) {
     auto dev = createMs912xDevice();
     if (!dev->open()) return 1;
@@ -147,6 +195,7 @@ int main(int argc, char** argv) {
         else if (!strcmp(argv[i], "--debug")) logSetLevel(LogLevel::Debug);
     }
     if (cmd == "info") return cmdInfo();
+    if (cmd == "trail") return cmdTrail(o);
     if (cmd == "bars" || cmd == "bench" || cmd == "multi") return cmdRun(cmd, o);
     fprintf(stderr, "unknown command\n");
     return 2;

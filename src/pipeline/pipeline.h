@@ -14,6 +14,7 @@
 #include "msdisp/device.h"
 #include "msdisp/gpu.h"
 #include "msdisp/vdd.h"
+#include "layout.h"
 
 namespace msdisp {
 
@@ -47,6 +48,7 @@ private:
     std::unique_ptr<ICapture> cap_;
     std::unique_ptr<IConverter> conv_;
     int vddIndex_ = -1;
+    std::vector<SavedOutput> parked_;  // vendor outputs detached while we run
     std::thread th_;
     std::atomic<bool> quit_{false};
     std::mutex mu_;

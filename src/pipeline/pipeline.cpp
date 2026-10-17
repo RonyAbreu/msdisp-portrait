@@ -75,6 +75,8 @@ bool Pipeline::setupVirtualDisplay() {
     }
     if (!setDisplayMode(gdi, cfg_.virtualWidth, cfg_.virtualHeight, 60))
         MSD_WARN("could not set %dx%d on %ls; using current mode", cfg_.virtualWidth, cfg_.virtualHeight, gdi.c_str());
+    parked_ = detachVendorOutputs();
+    placeOutput(gdi, cfg_.virtualWidth, parked_.empty() ? nullptr : &parked_[0]);
     std::lock_guard<std::mutex> lock(mu_);
     st_.virtualDisplay = gdi;
     return true;
@@ -213,6 +215,8 @@ void Pipeline::threadMain() {
     }
     vdd_.reset();
     vddIndex_ = -1;
+    restoreOutputs(parked_);
+    parked_.clear();
     if (dev_ && dev_->isOpen()) {
         dev_->stop();
         dev_->close();
