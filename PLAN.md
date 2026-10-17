@@ -117,3 +117,19 @@ Fase 0 em ~1 dia; Fase 1 com 4 trilhas em paralelo em ~2–3 dias corridos; Fase
 | 4 MS Idd | Monitor `MS Idd` (DISPLAY20) **persiste** com WinUsbDisplay fechado → plano B de monitor virtual. |
 
 **Achado de latência:** 3 frames cheios em voo ⇒ ~530 ms de atraso. Política final: no máximo 1 transferência grande em voo; sempre o frame mais novo; retângulos pequenos podem usar os slots extras.
+
+## 9. Resultados das Fases 1–3 (17/10/2026)
+
+- **Fase 1:** trilhas B (Parsec VDD + captura DXGI com cursor), C (GPU, bit-exata nas 4 rotações) e D (app de bandeja) feitas em paralelo e mergeadas sem conflito. A trilha A e o pipeline foram feitos nesta sessão.
+- **Fase 2:** ponta a ponta funcionando no hardware. Bugs achados e corrigidos:
+  - O 1º quadro não saía com a área de trabalho parada.
+  - `forceFull` lia uma cópia antiga da GPU.
+  - **O chip alterna entre 2 framebuffers por envio e só aplica 1 retângulo por envio.** Era a causa dos pontos verdes e do rastro do cursor; descoberto por experimento com o probe `trail`.
+  - O monitor fantasma "MS Idd" agora é estacionado e o monitor virtual vai para o lugar dele.
+- **Fase 3:**
+  - Tamanho do monitor virtual calculado a partir do modo e da rotação; modo 720p via slot 1 do Parsec.
+  - Timer de 1 ms e métricas no log.
+  - Reconexão corrigida: o app não reinicia mais em loop; ordem displays → chip; repaint nos 2 buffers; envio que falha marca o dispositivo como fechado.
+  - Medidas em 1080p: arrastar janela ~15,5 fps / ~32 ms; tela cheia 7,6 fps (limite do USB 2.0).
+
+Pendências: testar "Voltar ao driver original" e o início automático; instalar o exe num local fixo (hoje roda de `build\`).
