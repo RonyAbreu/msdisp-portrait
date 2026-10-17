@@ -37,6 +37,13 @@ file(GLOB GPU_SRC CONFIGURE_DEPENDS src/gpu/*.cpp)
 add_library(msdisp_gpu STATIC ${GPU_SRC})
 target_link_libraries(msdisp_gpu PUBLIC msdisp_common d3d11 dxgi d3dcompiler)
 
+# --- integration: pipeline -----------------------------------------------------
+add_library(msdisp_pipeline STATIC src/pipeline/pipeline.cpp)
+target_link_libraries(msdisp_pipeline PUBLIC msdisp_usb msdisp_vdd msdisp_capture msdisp_gpu)
+
+add_executable(portrait-run tools/portrait-run/main.cpp)
+target_link_libraries(portrait-run PRIVATE msdisp_pipeline)
+
 # --- track D: app shell -------------------------------------------------------
 file(GLOB APP_CORE_SRC CONFIGURE_DEPENDS src/app/core/*.cpp)
 add_library(msdisp_appcore STATIC ${APP_CORE_SRC})
