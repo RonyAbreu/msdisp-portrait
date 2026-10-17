@@ -106,3 +106,14 @@ Merge das 4 branches (com sua autorização), pipeline completo em `msdisp.exe` 
 
 ## 7. Estimativa
 Fase 0 em ~1 dia; Fase 1 com 4 trilhas em paralelo em ~2–3 dias corridos; Fases 2 e 3 em ~2–3 dias. **Total: ~1 semana**, contra 2–3 semanas sequencial.
+
+## 8. Resultados da Fase 0 (17/10/2026)
+
+| Spike | Resultado |
+|---|---|
+| 1 HID | OK — chip `b7 16 0a` = **MS912C**, porta 5 (HDMI), HPD=1, EDID válido "ATHEN V3 PRO" (1080p60 148.5 MHz + 1080p ~72 Hz) |
+| 2 Bulk | OK (confirmado visualmente) — libusb0 `iface=3`, EP 0x04. **Multi-rect por transferência funciona.** Full frame 1080p: 117 ms ≈ 35 MB/s → **7.6 fps** (32 MB/s sustentado); 720p: **15 fps**. Retângulos pequenos: 60/s. |
+| 3 DXGI em IDD | OK por evidência — WinUsbDisplay usa Desktop Duplication em saída IDD (`Win8DeskDuplicationThread`). Trilha B confirma no Parsec VDD. |
+| 4 MS Idd | Monitor `MS Idd` (DISPLAY20) **persiste** com WinUsbDisplay fechado → plano B de monitor virtual. |
+
+**Achado de latência:** 3 frames cheios em voo ⇒ ~530 ms de atraso. Política final: no máximo 1 transferência grande em voo; sempre o frame mais novo; retângulos pequenos podem usar os slots extras.
