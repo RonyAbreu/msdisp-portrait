@@ -111,15 +111,7 @@ void Pipeline::threadMain() {
     timeBeginPeriod(1);  // Sleep() granularity 1 ms for frame pacing
     dev_ = createMs912xDevice();
     while (!quit_) {
-        // (Re)connect device + displays.
-        if (!dev_->isOpen()) {
-            if (!dev_->open() || !dev_->start(cfg_.mode)) {
-                setState("adaptador USB não encontrado ou ocupado; tentando de novo", true);
-                dev_->close();
-                for (int i = 0; i < 20 && !quit_; ++i) Sleep(100);
-                continue;
-            }
-        }
+        // Displays first, chip last: once the chip is started it shows garbage until it receives a frame.
         if (!vdd_ && !setupVirtualDisplay()) {
             vdd_.reset();
             for (int i = 0; i < 30 && !quit_; ++i) Sleep(100);
@@ -130,6 +122,14 @@ void Pipeline::threadMain() {
             conv_.reset();
             for (int i = 0; i < 10 && !quit_; ++i) Sleep(100);
             continue;
+        }
+        if (!dev_->isOpen()) {
+            if (!dev_->open() || !dev_->start(cfg_.mode)) {
+                setState("adaptador USB não encontrado ou ocupado; tentando de novo", true);
+                dev_->close();
+                for (int i = 0; i < 20 && !quit_; ++i) Sleep(100);
+                continue;
+            }
         }
         setState("rodando");
 
@@ -146,6 +146,9 @@ void Pipeline::threadMain() {
             if (!dev_->flush(2000)) {
                 setState("transferência USB falhou; reconectando", true);
                 dev_->close();
+                // Restart capture too: its first frame is always full, which repaints the re-powered chip.
+                cap_.reset();
+                conv_.reset();
                 break;
             }
             if (lastCaptureUs) {
@@ -185,6 +188,8 @@ void Pipeline::threadMain() {
                 if (!cr.dirty.empty()) {
                     FrameUpdate up{cr.uyvy, cr.pitch, cr.dirty};
                     if (dev_->submit(up)) {
+                        // The chip rotates two frame buffers: a full repaint must reach both, now.
+                        if (forceFull && dev_->flush(2000)) dev_->submit(up);
                         forceFull = false;
                         lastCaptureUs = f.timeUs;
                         lastSubmitUs = nowUs();

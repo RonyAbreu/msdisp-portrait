@@ -196,12 +196,9 @@ LRESULT TrayApp::wndProc(UINT msg, WPARAM wp, LPARAM lp) {
         case WM_TIMER: onTimer(wp); return 0;
         case WM_COMMAND: onCommand(LOWORD(wp)); return 0;
         case WM_DISPLAYCHANGE:
+            // The pipeline recovers from display changes itself (capture ACCESS_LOST -> re-init); restarting it
+            // here would loop, because adding/removing our own virtual monitor is a display change too.
             overlayReposition();
-            if (controller_->busy() || int(GetTickCount() - settleUntilTick_) < 0) {
-                MSD_DEBUG("tray: WM_DISPLAYCHANGE %dx%d ignored (own transition)", LOWORD(lp), HIWORD(lp));
-            } else {
-                scheduleRestart("display change");
-            }
             return 0;
         case WM_DEVICECHANGE: onDeviceChange(wp, lp); return TRUE;
         case WM_QUERYENDSESSION: return TRUE;
@@ -322,8 +319,11 @@ void TrayApp::onDeviceChange(WPARAM event, LPARAM data) {
     if (!isOurAdapter(di->dbcc_name)) return;
     bool arrival = event == DBT_DEVICEARRIVAL;
     MSD_INFO("tray: adapter %s", arrival ? "connected" : "removed");
-    if (arrival) retryDelayMs_ = 0;
-    scheduleRestart(arrival ? "adapter connected" : "adapter removed");
+    // A running pipeline reconnects to the adapter by itself; only kick a stopped one.
+    if (arrival) {
+        retryDelayMs_ = 0;
+        if (!last_.running) scheduleRestart("adapter connected");
+    }
 }
 
 void TrayApp::scheduleRestart(const char* why) {
