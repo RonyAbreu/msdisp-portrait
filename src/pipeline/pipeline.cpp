@@ -198,6 +198,13 @@ void Pipeline::threadMain() {
                 }
                 conv_->done();
                 cap_->release();
+                if (!dev_->isOpen()) {
+                    setState("adaptador desconectado; reconectando", true);
+                    dev_->close();
+                    cap_.reset();
+                    conv_.reset();
+                    break;
+                }
             }
 
         meter:

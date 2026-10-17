@@ -131,10 +131,13 @@ public:
         }
         uh_ = nullptr;
         iface_ = -1;
+        broken_ = false;
         hid_.close();
     }
 
-    bool isOpen() const override { return uh_ != nullptr && hid_.isOpen(); }
+    // A failed transfer (unplug/replug invalidates the handle) makes the device report closed so the owner
+    // reconnects.
+    bool isOpen() const override { return uh_ != nullptr && hid_.isOpen() && !broken_; }
 
     bool readInfo(DeviceInfo& out) override {
         uint8_t port = 0, hpd = 0;
@@ -218,6 +221,7 @@ public:
         const usb0::Api* a = usb0::api();
         if (a->submit_async(slot.ctx, reinterpret_cast<char*>(slot.buf.data()), int(total)) < 0) {
             MSD_ERROR("usb_submit_async failed: %s", a->strerror());
+            broken_ = true;
             return false;
         }
         slot.busy = true;
@@ -322,6 +326,7 @@ private:
         s.busy = false;
         if (r < 0) {
             MSD_ERROR("bulk transfer failed (%d): %s", r, a->strerror());
+            broken_ = true;
             return false;
         }
         if (zlp_) {
@@ -339,6 +344,7 @@ private:
     Damage pending_[kMaxBuf];
     int cur_ = 0;
     bool zlp_ = true;
+    bool broken_ = false;
     int nbuf_ = 2;  // chip frame buffers in rotation: damage is replayed into each of them
     HidControl hid_;
     usb0::usb_dev_handle* uh_ = nullptr;
