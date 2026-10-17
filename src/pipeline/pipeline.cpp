@@ -1,6 +1,7 @@
 #include "pipeline.h"
 
 #include <windows.h>
+#include <timeapi.h>
 
 #include <algorithm>
 
@@ -22,6 +23,10 @@ struct Meter {
 bool Pipeline::start(const Config& cfg) {
     stop();
     cfg_ = cfg;
+    // The virtual monitor must be the chip mode rotated back: portrait for 90/270, landscape for 0/180.
+    const bool swap = cfg.rotation == Rotation::CW90 || cfg.rotation == Rotation::CW270;
+    cfg_.virtualWidth = swap ? cfg.mode.height : cfg.mode.width;
+    cfg_.virtualHeight = swap ? cfg.mode.width : cfg.mode.height;
     quit_ = false;
     {
         std::lock_guard<std::mutex> lock(mu_);
@@ -103,6 +108,7 @@ bool Pipeline::setupCapture() {
 
 void Pipeline::threadMain() {
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
+    timeBeginPeriod(1);  // Sleep() granularity 1 ms for frame pacing
     dev_ = createMs912xDevice();
     while (!quit_) {
         // (Re)connect device + displays.
@@ -132,6 +138,7 @@ void Pipeline::threadMain() {
         m.windowStart = nowUs();
         m.bytesAtStart = dev_->stats().bytesSent;
         int64_t lastCaptureUs = 0, lastSubmitUs = 0;
+        int logTick = 0;
         const int64_t minIntervalUs = cfg_.fpsCap > 0 ? 1000000 / cfg_.fpsCap : 0;
 
         while (!quit_) {
@@ -198,6 +205,9 @@ void Pipeline::threadMain() {
                 st_.mbps = double(ds.bytesSent - m.bytesAtStart) / secs / 1e6;
                 st_.latencyMs = m.latN ? m.latSum / m.latN : 0;
                 st_.dropped = ds.framesDropped;
+                if (++logTick % 30 == 0)
+                    MSD_INFO("stats: %.1f fps, %.2f MB/s, latency %.1f ms, last transfer %.1f ms", st_.fps, st_.mbps,
+                             st_.latencyMs, ds.lastTransferMs);
                 m = Meter{};
                 m.windowStart = now;
                 m.bytesAtStart = ds.bytesSent;
@@ -222,6 +232,7 @@ void Pipeline::threadMain() {
         dev_->close();
     }
     dev_.reset();
+    timeEndPeriod(1);
 }
 
 }  // namespace msdisp

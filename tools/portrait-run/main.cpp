@@ -26,7 +26,6 @@ int main(int argc, char** argv) {
         else if (!strcmp(argv[i], "--sec") && i + 1 < argc) sec = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--debug")) logSetLevel(LogLevel::Debug);
     }
-    if (cfg.mode.width == 1280) cfg.virtualWidth = 720, cfg.virtualHeight = 1280;
     SetConsoleCtrlHandler(onCtrl, TRUE);
     Pipeline p;
     p.start(cfg);
