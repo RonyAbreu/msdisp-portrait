@@ -23,6 +23,7 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--rot") && i + 1 < argc) cfg.rotation = Rotation(atoi(argv[++i]));
         else if (!strcmp(argv[i], "--720")) cfg.mode = Mode{1280, 720, 60, 0x4f};
+        else if (!strcmp(argv[i], "--1366")) cfg.mode = Mode{1366, 768, 60, 0x66};
         else if (!strcmp(argv[i], "--sec") && i + 1 < argc) sec = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--debug")) logSetLevel(LogLevel::Debug);
     }

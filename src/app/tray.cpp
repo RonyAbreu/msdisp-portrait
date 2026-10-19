@@ -372,7 +372,8 @@ void TrayApp::showMenu() {
     const UINT nModes = UINT(std::size(kKnownModes));
     for (UINT i = 0; i < nModes; ++i) {
         const auto& k = kKnownModes[i];
-        AppendMenuW(res, MF_STRING, IDM_MODE_BASE + i, fmt(L"%dx%d@%d", k.width, k.height, k.hz).c_str());
+        const wchar_t* hint = k.width == 1920 ? L"  (nítido)" : L"  (mais fluido)";
+        AppendMenuW(res, MF_STRING, IDM_MODE_BASE + i, fmt(L"%dx%d@%d%ls", k.width, k.height, k.hz, hint).c_str());
         if (k.width == cfg_.mode.width && k.height == cfg_.mode.height && k.hz == cfg_.mode.hz)
             CheckMenuRadioItem(res, IDM_MODE_BASE, IDM_MODE_BASE + nModes - 1, IDM_MODE_BASE + i, MF_BYCOMMAND);
     }

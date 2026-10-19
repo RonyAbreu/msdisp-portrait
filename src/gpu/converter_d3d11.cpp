@@ -57,6 +57,7 @@ constexpr int kGroupY = 8;
 
 const char kShader[] = R"hlsl(
 Texture2D<float4> src : register(t0);
+SamplerState lin : register(s0);
 RWByteAddressBuffer packed : register(u0);
 RWByteAddressBuffer flags : register(u1);
 
@@ -69,9 +70,31 @@ cbuffer Params : register(b0) {
     uint tilePairs;  // tileW / 2
     uint tileH;
     uint tilesX;
+    uint scaled;     // 1 when the rotated source size differs from the output
+    float scaleX;    // rotated-source pixels per output pixel
+    float scaleY;
+    uint pad;
 };
 
+// Continuous position in rotated space -> normalized source UV (inverse of the integer mapping below).
+float2 srcUv(float rx, float ry) {
+    float2 p;
+    if (rot == 0) p = float2(rx, ry);
+    else if (rot == 1) p = float2(ry, float(srcH) - rx);
+    else if (rot == 2) p = float2(float(srcW) - rx, float(srcH) - ry);
+    else p = float2(float(srcW) - ry, rx);
+    return p / float2(srcW, srcH);
+}
+
 int3 rgbAt(uint ox, uint oy) {
+    if (scaled != 0) {
+        // Downscale: 2x2 supersampling of bilinear taps covers the source footprint (box-like filter, sharp text).
+        float cx = (float(ox) + 0.5f) * scaleX, cy = (float(oy) + 0.5f) * scaleY;
+        float dx = 0.25f * scaleX, dy = 0.25f * scaleY;
+        float3 c = src.SampleLevel(lin, srcUv(cx - dx, cy - dy), 0).rgb + src.SampleLevel(lin, srcUv(cx + dx, cy - dy), 0).rgb +
+                   src.SampleLevel(lin, srcUv(cx - dx, cy + dy), 0).rgb + src.SampleLevel(lin, srcUv(cx + dx, cy + dy), 0).rgb;
+        return int3(saturate(c * 0.25f) * 255.0f + 0.5f);
+    }
     uint sx, sy;
     if (rot == 0) { sx = ox; sy = oy; }
     else if (rot == 1) { sx = oy; sy = srcH - 1 - ox; }
@@ -105,6 +128,9 @@ void main(uint3 id : SV_DispatchThreadID) {
 
 struct Params {
     uint32_t outPairs, outH, srcW, srcH, rot, tilePairs, tileH, tilesX;
+    uint32_t scaled;
+    float scaleX, scaleY;
+    uint32_t pad;
 };
 
 int rotIndex(Rotation r) {
@@ -172,6 +198,11 @@ public:
         cb.Usage = D3D11_USAGE_DEFAULT;
         cb.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
         if (!check(dev->CreateBuffer(&cb, nullptr, cbuf_.put()), "CreateBuffer(cb)")) return false;
+        D3D11_SAMPLER_DESC sdsc = {};
+        sdsc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+        sdsc.AddressU = sdsc.AddressV = sdsc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+        sdsc.MaxLOD = D3D11_FLOAT32_MAX;
+        if (!check(dev->CreateSamplerState(&sdsc, sampler_.put()), "CreateSamplerState")) return false;
 
         // Start from an all-zero "previous" frame.
         const UINT zero[4] = {};
@@ -194,9 +225,10 @@ public:
         src->GetDesc(&sd);
         const int rw = swapsAxes(rot) ? int(sd.Height) : int(sd.Width);
         const int rh = swapsAxes(rot) ? int(sd.Width) : int(sd.Height);
-        if (rw != outW_ || rh != outH_) {
-            MSD_ERROR("gpu: source %ux%u rotated %d is %dx%d, output is %dx%d (scaling unsupported)", sd.Width,
-                      sd.Height, int(rot), rw, rh, outW_, outH_);
+        const bool scaled = rw != outW_ || rh != outH_;
+        if (scaled && (rw < outW_ || rh < outH_)) {
+            MSD_ERROR("gpu: source %ux%u rotated %d is %dx%d, smaller than output %dx%d (upscaling unsupported)",
+                      sd.Width, sd.Height, int(rot), rw, rh, outW_, outH_);
             return false;
         }
         if (sd.Format != DXGI_FORMAT_B8G8R8A8_UNORM && sd.Format != DXGI_FORMAT_B8G8R8A8_TYPELESS) {
@@ -206,7 +238,8 @@ public:
         if (!bindSource(src, sd)) return false;
 
         Params p = {uint32_t(outW_ / 2), uint32_t(outH_), sd.Width, sd.Height, uint32_t(rotIndex(rot)),
-                    uint32_t(tileW_ / 2), uint32_t(tileH_), uint32_t(tilesX_)};
+                    uint32_t(tileW_ / 2), uint32_t(tileH_), uint32_t(tilesX_), scaled ? 1u : 0u,
+                    float(rw) / float(outW_), float(rh) / float(outH_), 0};
         if (memcmp(&p, &lastParams_, sizeof(p)) != 0) {
             ctx_->UpdateSubresource(cbuf_.get(), 0, nullptr, &p, 0, 0);
             lastParams_ = p;
@@ -218,6 +251,8 @@ public:
         ID3D11UnorderedAccessView* uavs[2] = {packedUav_.get(), flagsUav_.get()};
         ID3D11ShaderResourceView* srv = srv_.get();
         ID3D11Buffer* cb = cbuf_.get();
+        ID3D11SamplerState* smp = sampler_.get();
+        c->CSSetSamplers(0, 1, &smp);
         c->CSSetShader(cs_.get(), nullptr, 0);
         c->CSSetShaderResources(0, 1, &srv);
         c->CSSetUnorderedAccessViews(0, 2, uavs, nullptr);
@@ -404,6 +439,7 @@ private:
     Com<ID3D11Buffer> packed_, flags_, packedStaging_, flagsStaging_, cbuf_;
     Com<ID3D11UnorderedAccessView> packedUav_, flagsUav_;
     Com<ID3D11ShaderResourceView> srv_;
+    Com<ID3D11SamplerState> sampler_;
     Com<ID3D11Texture2D> copyTex_, srcRef_;
     ID3D11Texture2D* lastSrc_ = nullptr;
     Params lastParams_ = {};

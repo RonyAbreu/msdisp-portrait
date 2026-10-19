@@ -13,8 +13,9 @@ struct KnownMode {
 
 // Order = order in the tray "Resolução" submenu.
 inline constexpr KnownMode kKnownModes[] = {
-    {1920, 1080, 60, 0x81},
-    {1280, 720, 60, 0x4F},
+    {1920, 1080, 60, 0x81},  // sharp, USB 2.0 bound (~7.6 fps full screen)
+    {1366, 768, 60, 0x66},   // native 768x1366 desktop: ~2x fewer bytes
+    {1280, 720, 60, 0x4F},   // native 720x1280 desktop: ~2.25x fewer bytes
 };
 
 inline Mode toMode(const KnownMode& k) { return Mode{k.width, k.height, k.hz, k.vic}; }

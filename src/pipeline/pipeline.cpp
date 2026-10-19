@@ -40,7 +40,11 @@ double percentile(std::vector<double> v, double p) {
 bool Pipeline::start(const Config& cfg) {
     stop();
     cfg_ = cfg;
-    // The virtual monitor must be the chip mode rotated back: portrait for 90/270, landscape for 0/180.
+    // The virtual monitor is the chip mode rotated back (portrait for 90/270, landscape for 0/180), so pixels map
+    // 1:1 and text stays crisp in the smaller modes (user preference over a 1080p desktop downscaled by the GPU,
+    // which the converter still supports). Needs the matching Parsec custom modes: 1080x1920, 768x1366, 720x1280.
+    // (Tested: overlapping capture/convert with the USB transfer gave no fps and +10 ms latency, so the loop
+    // stays serialized.)
     const bool swap = cfg.rotation == Rotation::CW90 || cfg.rotation == Rotation::CW270;
     cfg_.virtualWidth = swap ? cfg.mode.height : cfg.mode.width;
     cfg_.virtualHeight = swap ? cfg.mode.width : cfg.mode.height;
