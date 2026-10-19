@@ -47,7 +47,7 @@ target_link_libraries(portrait-run PRIVATE msdisp_pipeline)
 # --- track D: app shell -------------------------------------------------------
 file(GLOB APP_CORE_SRC CONFIGURE_DEPENDS src/app/core/*.cpp)
 add_library(msdisp_appcore STATIC ${APP_CORE_SRC})
-target_link_libraries(msdisp_appcore PUBLIC msdisp_common shell32 ole32 user32 advapi32)
+target_link_libraries(msdisp_appcore PUBLIC msdisp_common shell32 ole32 oleaut32 uuid user32 advapi32)
 
 file(GLOB APP_SRC CONFIGURE_DEPENDS src/app/*.cpp src/app/*.rc)
 add_executable(msdisp WIN32 ${APP_SRC})

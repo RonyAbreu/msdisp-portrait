@@ -34,6 +34,7 @@ O pipeline é serializado: espera o envio USB terminar e só então captura o qu
    - Resolução: 1920x1080 ou 1280x720 (o 720p tem o dobro de fps, mas menos nitidez).
    - Mostrar métricas na tela.
    - Iniciar com o Windows.
+   - **Área de trabalho → Salvar / Restaurar organização dos ícones**: guarda a posição de cada ícone (relativa ao monitor principal) em `%APPDATA%\msdisp\desktop-layout.txt` e devolve tudo ao lugar quando o Windows embaralhar os ícones (isso acontece quando o monitor virtual aparece, some ou muda de tamanho). Ícones novos vão para a esquerda (programas) ou para a direita (pastas).
    - **Voltar ao driver original**: para o msdisp e religa o WinUsbDisplay.
    - Abrir log e Abrir configuração.
 4. Configuração: `%APPDATA%\msdisp\msdisp.ini`. Log: `%APPDATA%\msdisp\msdisp.log` (métricas a cada 30 s).

@@ -10,6 +10,7 @@
 #include <cwctype>
 
 #include "core/autostart.h"
+#include "core/desktop_icons.h"
 #include "core/modes.h"
 #include "core/util.h"
 #include "core/vendor.h"
@@ -47,6 +48,8 @@ enum : UINT {
     IDM_VENDOR,
     IDM_OPEN_LOG,
     IDM_OPEN_CONFIG,
+    IDM_DESK_RESTORE,
+    IDM_DESK_SAVE,
     IDM_EXIT,
 };
 
@@ -382,6 +385,11 @@ void TrayApp::showMenu() {
     AppendMenuW(menu, MF_STRING | (cfg_.showOverlay ? MF_CHECKED : 0), IDM_OVERLAY, L"Mostrar métricas na tela");
     AppendMenuW(menu, MF_STRING | (autostartEnabled() ? MF_CHECKED : 0), IDM_AUTOSTART, L"Iniciar com o Windows");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    HMENU desk = CreatePopupMenu();
+    AppendMenuW(desk, MF_STRING, IDM_DESK_RESTORE, L"Restaurar organização dos ícones");
+    AppendMenuW(desk, MF_STRING, IDM_DESK_SAVE, L"Salvar organização atual");
+    AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(desk), L"Área de trabalho");
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, IDM_VENDOR, L"Voltar ao driver original");
     AppendMenuW(menu, MF_STRING, IDM_OPEN_LOG, L"Abrir log");
     AppendMenuW(menu, MF_STRING, IDM_OPEN_CONFIG, L"Abrir configuração");
@@ -442,6 +450,26 @@ void TrayApp::onCommand(UINT id) {
             break;
         }
         case IDM_VENDOR: returnToVendor(); break;
+        case IDM_DESK_SAVE: {
+            DesktopIconResult r = saveDesktopLayout(defaultDesktopLayoutPath());
+            balloon(L"msdisp", r.ok ? fmt(L"Organização salva: %d ícones.", r.total) : L"Falhou: " + r.error,
+                    r.ok ? NIIF_INFO : NIIF_WARNING);
+            break;
+        }
+        case IDM_DESK_RESTORE: {
+            const std::wstring path = defaultDesktopLayoutPath();
+            if (!fileExists(path)) {
+                balloon(L"msdisp", L"Nenhuma organização salva ainda. Use \"Salvar organização atual\" primeiro.",
+                        NIIF_WARNING);
+                break;
+            }
+            DesktopIconResult r = restoreDesktopLayout(path);
+            balloon(L"msdisp",
+                    r.ok ? fmt(L"Ícones reorganizados: %d de %d (%d novos).", r.placed + r.added, r.total, r.added)
+                         : L"Falhou: " + r.error,
+                    r.ok ? NIIF_INFO : NIIF_WARNING);
+            break;
+        }
         case IDM_OPEN_LOG: openFile(resolvedLogPath(cfg_)); break;
         case IDM_OPEN_CONFIG:
             if (!fileExists(opts_.configPath)) saveConfig(opts_.configPath, cfg_);
