@@ -4,6 +4,7 @@
 #include <timeapi.h>
 
 #include <algorithm>
+#include <vector>
 
 #include "msdisp/log.h"
 
@@ -18,6 +19,22 @@ struct Meter {
     double latSum = 0;
     int latN = 0;
 };
+
+// 30 s accumulation for the log: what the user actually experiences while things move.
+struct Window30 {
+    int64_t start = 0;
+    int updates = 0, activeSecs = 0, secs = 0;
+    uint64_t bytes = 0, maxBytes = 0;
+    int64_t usbBusyUs = 0, convertUs = 0;
+    std::vector<double> lat;
+};
+
+double percentile(std::vector<double> v, double p) {
+    if (v.empty()) return 0;
+    size_t k = std::min(v.size() - 1, size_t(p * double(v.size())));
+    std::nth_element(v.begin(), v.begin() + ptrdiff_t(k), v.end());
+    return v[k];
+}
 }  // namespace
 
 bool Pipeline::start(const Config& cfg) {
@@ -138,12 +155,17 @@ void Pipeline::threadMain() {
         m.windowStart = nowUs();
         m.bytesAtStart = dev_->stats().bytesSent;
         int64_t lastCaptureUs = 0, lastSubmitUs = 0;
-        int logTick = 0;
+        Window30 w;
+        w.start = nowUs();
+        uint64_t bytesPrev = dev_->stats().bytesSent;
         const int64_t minIntervalUs = cfg_.fpsCap > 0 ? 1000000 / cfg_.fpsCap : 0;
 
         while (!quit_) {
             // 1. Wait until the USB link is idle so we always capture the newest frame.
-            if (!dev_->flush(2000)) {
+            const int64_t flushStart = nowUs();
+            const bool flushed = dev_->flush(2000);
+            if (lastCaptureUs) w.usbBusyUs += nowUs() - flushStart;
+            if (!flushed) {
                 setState("transferência USB falhou; reconectando", true);
                 dev_->close();
                 // Restart capture too: its first frame is always full, which repaints the re-powered chip.
@@ -152,9 +174,15 @@ void Pipeline::threadMain() {
                 break;
             }
             if (lastCaptureUs) {
-                m.latSum += double(nowUs() - lastCaptureUs) / 1000.0;
+                const double lat = double(nowUs() - lastCaptureUs) / 1000.0;
+                m.latSum += lat;
                 m.latN++;
+                w.lat.push_back(lat);
                 lastCaptureUs = 0;
+                const uint64_t b = dev_->stats().bytesSent;
+                w.bytes += b - bytesPrev;
+                w.maxBytes = std::max<uint64_t>(w.maxBytes, b - bytesPrev);
+                bytesPrev = b;
             }
             if (minIntervalUs) {
                 int64_t wait = lastSubmitUs + minIntervalUs - nowUs();
@@ -175,8 +203,10 @@ void Pipeline::threadMain() {
             // 3. Convert + 4. submit.
             {
                 ConvertResult cr;
+                const int64_t convStart = nowUs();
                 bool ok = conv_->process(f.texture, cfg_.rotation, f.full ? std::vector<Rect>{} : f.dirty,
                                          forceFull, cr);
+                w.convertUs += nowUs() - convStart;
                 if (!ok) {
                     cap_->release();
                     setState("tamanho do monitor virtual não bate com a rotação/modo", true);
@@ -194,6 +224,7 @@ void Pipeline::threadMain() {
                         lastCaptureUs = f.timeUs;
                         lastSubmitUs = nowUs();
                         m.frames++;
+                        w.updates++;
                     }
                 }
                 conv_->done();
@@ -217,9 +248,27 @@ void Pipeline::threadMain() {
                 st_.mbps = double(ds.bytesSent - m.bytesAtStart) / secs / 1e6;
                 st_.latencyMs = m.latN ? m.latSum / m.latN : 0;
                 st_.dropped = ds.framesDropped;
-                if (++logTick % 30 == 0)
-                    MSD_INFO("stats: %.1f fps, %.2f MB/s, latency %.1f ms, last transfer %.1f ms", st_.fps, st_.mbps,
-                             st_.latencyMs, ds.lastTransferMs);
+                w.secs++;
+                if (m.frames > 0) w.activeSecs++;
+                if (now - w.start >= 30000000) {
+                    if (w.updates > 0) {
+                        const double act = std::max(1, w.activeSecs);
+                        double latAvg = 0;
+                        for (double x : w.lat) latAvg += x;
+                        if (!w.lat.empty()) latAvg /= double(w.lat.size());
+                        const double wall = double(now - w.start) / 1e6;
+                        MSD_INFO("stats30s: active %d/%d s | %.1f fps while active | %.0f KB/update (max %.0f) | "
+                                 "%.1f MB/s while active | USB busy %.0f%% | latency avg %.1f p95 %.1f max %.1f ms | "
+                                 "convert %.2f ms",
+                                 w.activeSecs, w.secs, w.updates / act, double(w.bytes) / w.updates / 1024.0,
+                                 double(w.maxBytes) / 1024.0, double(w.bytes) / act / 1e6,
+                                 100.0 * double(w.usbBusyUs) / 1e6 / wall, latAvg, percentile(w.lat, 0.95),
+                                 w.lat.empty() ? 0.0 : *std::max_element(w.lat.begin(), w.lat.end()),
+                                 double(w.convertUs) / 1000.0 / w.updates);
+                    }
+                    w = Window30{};
+                    w.start = now;
+                }
                 m = Meter{};
                 m.windowStart = now;
                 m.bytesAtStart = ds.bytesSent;

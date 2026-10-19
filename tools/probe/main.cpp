@@ -84,19 +84,18 @@ Mode pickMode(const Opts& o) {
 
 // Moving 32x32 square, 4 variants (color coded) of ZLP / double-buffer damage / pacing.
 int cmdTrail(const Opts& o) {
-    struct V { const char* name; const char* zlp; const char* dbl; const char* single; int paceMs; int r, g, b; };
-    const V vs[] = {{"RED    single zlp=1 nbuf=1", "1", "1", "1", 0, 255, 0, 0},
-                    {"GREEN  single zlp=1 nbuf=2", "1", "2", "1", 0, 0, 255, 0},
-                    {"BLUE   single zlp=1 nbuf=3", "1", "3", "1", 0, 0, 80, 255},
-                    {"YELLOW single zlp=1 nbuf=4", "1", "4", "1", 0, 255, 255, 0}};
+    struct V { const char* name; const char* tm; const char* nbuf; const char* single; int r, g, b; };
+    const V vs[] = {{"RED    mode3 nbuf1 single (control: trails)", "3", "1", "1", 255, 0, 0},
+                    {"GREEN  mode5 bypass-block nbuf1 single", "5", "1", "1", 0, 255, 0},
+                    {"BLUE   mode5 bypass-block nbuf1 MULTI", "5", "1", "0", 0, 80, 255},
+                    {"YELLOW mode4 bypass-frame nbuf1 single", "4", "1", "1", 255, 255, 0}};
     Mode m = pickMode(o);
     int pitch = m.width * 2;
     std::vector<uint8_t> frame(size_t(pitch) * m.height);
     for (const V& v : vs) {
-        SetEnvironmentVariableA("MSDISP_ZLP", v.zlp);
-        _putenv_s("MSDISP_ZLP", v.zlp);
-        _putenv_s("MSDISP_NBUF", v.dbl);
-        _putenv_s("MSDISP_SINGLE_RECT", v.single);
+        _putenv_s("MSDISP_TRANSMODE", v.tm);
+        _putenv_s("MSDISP_NBUF", v.nbuf);
+        _putenv_s("MSDISP_MULTI_RECT", *v.single == '1' ? "0" : "1");
         auto dev = createMs912xDevice();
         if (!dev->open() || !dev->start(m)) return 1;
         fillRect(frame, pitch, {0, 0, m.width, m.height}, 60, 60, 60);
@@ -118,7 +117,6 @@ int cmdTrail(const Opts& o) {
             FrameUpdate up{frame.data(), pitch, {old, cur}};
             dev->submit(up);
             dev->flush(1000);
-            if (v.paceMs) Sleep(DWORD(v.paceMs));
             ++n;
         }
         printf("  %d updates; holding 4 s\n", n), fflush(stdout);

@@ -108,12 +108,14 @@ public:
         multiRect_ = env && *env == '1';
         env = std::getenv("MSDISP_ZLP");
         zlp_ = !(env && *env == '0');
+        env = std::getenv("MSDISP_TRANSMODE");
+        transMode_ = env ? uint8_t(std::clamp(atoi(env), 0, 5)) : kTransModeManualBlock;
         env = std::getenv("MSDISP_NBUF");
         nbuf_ = env ? std::clamp(atoi(env), 1, kMaxBuf) : 2;
         env = std::getenv("MSDISP_DOUBLE");
         if (env && *env == '0') nbuf_ = 1;
-        MSD_INFO("device open: %s iface=%d hid=%ls multiRect=%d", found->filename, iface_, hid_.path().c_str(),
-                 multiRect_);
+        MSD_INFO("device open: %s iface=%d hid=%ls multiRect=%d transMode=%d nbuf=%d", found->filename, iface_,
+                 hid_.path().c_str(), multiRect_, transMode_, nbuf_);
         return true;
     }
 
@@ -169,7 +171,7 @@ public:
         uint8_t dummy;
         bool ok = vid(kSubPower, {0x01, 0x02}) && hid_.video(kSubTransfer, zero) &&
                   hid_.readByte(0x0030, dummy) && hid_.readByte(0x0033, dummy) && hid_.readByte(0xC620, dummy) &&
-                  vid(kSubTransMode, {kTransModeManualBlock}) &&
+                  vid(kSubTransMode, {transMode_}) &&
                   vid(kSubInInfo, {uint8_t(m.width >> 8), uint8_t(m.width), uint8_t(m.height >> 8),
                                    uint8_t(m.height), kPixFmtUyvy, 0x00}) &&
                   vid(kSubOutInfo, {m.vic, 0x01, uint8_t(m.width >> 8), uint8_t(m.width), uint8_t(m.height >> 8),
@@ -345,6 +347,7 @@ private:
     int cur_ = 0;
     bool zlp_ = true;
     bool broken_ = false;
+    uint8_t transMode_ = kTransModeManualBlock;  // 0 frame, 3 manual block, 4 bypass frame, 5 bypass manual block
     int nbuf_ = 2;  // chip frame buffers in rotation: damage is replayed into each of them
     HidControl hid_;
     usb0::usb_dev_handle* uh_ = nullptr;
